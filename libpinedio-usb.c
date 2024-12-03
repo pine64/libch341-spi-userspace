@@ -215,7 +215,7 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
     inst->interrupts[i].callback = NULL;
   }
 
-  inst->options[PINEDIO_OPTION_AUTO_CS] = 0;
+  inst->options[PINEDIO_OPTION_AUTO_CS] = 1;
 
   ret = pthread_mutex_init(&inst->usb_access_mutex, NULL);
   if (ret != 0) {
@@ -294,7 +294,7 @@ int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option
 
 int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode) {
     if (mode == 1) { // output
-    pinedio_d_mode |= 1 << pin;
+    pinedio_d_mode |= (1 << pin);
   } else {
     pinedio_d_mode &= ~(1 << pin);
   }
@@ -304,7 +304,7 @@ int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t m
           CH341_CMD_UIO_STM_END
   };
 
-  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
+  int32_t ret = 0; //usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
   if (ret < 0) {
     printf("Failed to set CS pin.\n");
   }
@@ -313,13 +313,14 @@ int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t m
 
 int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active) {
   if (active) {
-    pinedio_d_state |= 1 << pin;
+    pinedio_d_state |= (1 << pin);
   } else {
     pinedio_d_state &= ~(1 << pin);
   }
     uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
           CH341_CMD_UIO_STM_OUT | pinedio_d_state,  // bitfield controlling value of d0-d7 where the rightmost bit is d0
+          CH341_CMD_UIO_STM_DIR | pinedio_d_mode,
           CH341_CMD_UIO_STM_END
   };
 
@@ -332,18 +333,8 @@ int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool acti
 }
 
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
-  uint8_t buf[] = {
-          CH341_CMD_UIO_STREAM,
-          CH341_CMD_UIO_STM_DIR | 0x3f, // enable output on d0-d5
-          CH341_CMD_UIO_STM_OUT | (active ? 0x36 : 0x37),  // bitfield controlling value of d0-d7 where the rightmost bit is d0
-          CH341_CMD_UIO_STM_END
-  };
-
-  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
-  if (ret < 0) {
-    printf("Failed to set CS pin.\n");
-  }
-  return ret;
+  return pinedio_digital_write(inst, 0, active);
+  
 }
 
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt) {
