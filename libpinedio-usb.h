@@ -58,9 +58,12 @@ struct pinedio_inst {
 
 int32_t pinedio_init(struct pinedio_inst* inst, void* driver);
 int32_t pinedio_set_option(struct pinedio_inst* inst, enum pinedio_option option, uint32_t value);
+int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode);
+int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active);
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active);
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt);
 int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_t* read_buf, uint32_t count);
+int32_t pinedio_digital_read(struct pinedio_inst *inst, uint32_t pin);
 int32_t pinedio_get_irq_state(struct pinedio_inst *inst);
 int32_t pinedio_attach_interrupt(struct pinedio_inst* inst, enum pinedio_int_pin int_pin, enum pinedio_int_mode int_mode, void (*callback)(void));
 int32_t pinedio_deattach_interrupt(struct pinedio_inst* inst, enum pinedio_int_pin int_pin);

@@ -203,6 +203,10 @@ static uint8_t reverse_byte(uint8_t x) {
   return x;
 }
 
+int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active) {
+
+}
+
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
   uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
@@ -311,6 +315,10 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
   }
 
   return 0;
+}
+
+int32_t pinedio_digital_read(struct pinedio_inst *inst, uint32_t pin) {
+
 }
 
 int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
@@ -531,4 +539,8 @@ unlock:
 
 int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option, uint32_t value) {
   inst->options[option] = value;
+}
+
+int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode) {
+
 }
