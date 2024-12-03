@@ -37,6 +37,10 @@
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+// store mode and state of d0-d7
+uint16_t pinedio_d_mode = 0;
+uint16_t pinedio_d_state = 0;
+
 enum trans_state {TRANS_ACTIVE = -2, TRANS_ERR = -1, TRANS_IDLE = 0};
 
 static void platform_sleep(uint32_t msecs) {
@@ -290,13 +294,13 @@ int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option
 
 int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode) {
     if (mode == 1) { // output
-    pindeio_d_mode |= 1 << pin;
+    pinedio_d_mode |= 1 << pin;
   } else {
-    pindeio_d_mode &= ~(1 << pin);
+    pinedio_d_mode &= ~(1 << pin);
   }
   uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
-          CH341_CMD_UIO_STM_DIR | pindeio_d_mode, // enable output on d0-d5
+          CH341_CMD_UIO_STM_DIR | pinedio_d_mode, // enable output on d0-d5
           CH341_CMD_UIO_STM_END
   };
 
@@ -309,13 +313,13 @@ int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t m
 
 int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active) {
   if (active) {
-    pindeio_d_state |= 1 << pin;
+    pinedio_d_state |= 1 << pin;
   } else {
-    pindeio_d_state &= ~(1 << pin);
+    pinedio_d_state &= ~(1 << pin);
   }
     uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
-          CH341_CMD_UIO_STM_OUT | pindeio_d_state,  // bitfield controlling value of d0-d7 where the rightmost bit is d0
+          CH341_CMD_UIO_STM_OUT | pinedio_d_state,  // bitfield controlling value of d0-d7 where the rightmost bit is d0
           CH341_CMD_UIO_STM_END
   };
 

@@ -15,9 +15,7 @@ extern "C" {
 
 #define USB_IN_TRANSFERS 32
 
-// store mode and state of d0-d7
-uint16_t pindeio_d_mode = 0;
-uint16_t pindeio_d_state = 0;
+
 
 enum pinedio_int_pin {
   PINEDIO_PIN_D0,
