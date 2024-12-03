@@ -215,7 +215,7 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
     inst->interrupts[i].callback = NULL;
   }
 
-  inst->options[PINEDIO_OPTION_AUTO_CS] = 1;
+  inst->options[PINEDIO_OPTION_AUTO_CS] = 0;
 
   ret = pthread_mutex_init(&inst->usb_access_mutex, NULL);
   if (ret != 0) {
