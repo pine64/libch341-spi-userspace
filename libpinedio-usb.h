@@ -15,9 +15,22 @@ extern "C" {
 
 #define USB_IN_TRANSFERS 32
 
+// store mode and state of d0-d7
+uint16_t pindeio_d_mode = 0;
+uint16_t pindeio_d_state = 0;
+
 enum pinedio_int_pin {
-  PINEDIO_INT_PIN_IRQ,
-//  PINEDIO_INT_PIN_BUSY, // not implemented yet
+  PINEDIO_PIN_D0,
+  PINEDIO_PIN_D1,
+  PINEDIO_PIN_D2,
+  PINEDIO_PIN_D3,
+  PINEDIO_PIN_D4,
+  PINEDIO_PIN_D5,
+  PINEDIO_PIN_D6,
+  PINEDIO_PIN_D7,
+  PINEDIO_PIN_ERR,
+  PINEDIO_PIN_PEMP,
+  PINEDIO_PIN_INT,
   PINEDIO_INT_PIN_MAX
 };
 
@@ -64,7 +77,7 @@ int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active);
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt);
 int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_t* read_buf, uint32_t count);
 int32_t pinedio_digital_read(struct pinedio_inst *inst, uint32_t pin);
-int32_t pinedio_get_irq_state(struct pinedio_inst *inst);
+int32_t pinedio_get_irq_state(struct pinedio_inst *inst, uint32_t pin);
 int32_t pinedio_attach_interrupt(struct pinedio_inst* inst, enum pinedio_int_pin int_pin, enum pinedio_int_mode int_mode, void (*callback)(void));
 int32_t pinedio_deattach_interrupt(struct pinedio_inst* inst, enum pinedio_int_pin int_pin);
 void pinedio_deinit(struct pinedio_inst* inst);

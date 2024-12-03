@@ -289,18 +289,49 @@ int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option
 }
 
 int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode) {
+    if (mode == 1) { // output
+    pindeio_d_mode |= 1 << pin;
+  } else {
+    pindeio_d_mode &= ~(1 << pin);
+  }
+  uint8_t buf[] = {
+          CH341_CMD_UIO_STREAM,
+          CH341_CMD_UIO_STM_DIR | pindeio_d_mode, // enable output on d0-d5
+          CH341_CMD_UIO_STM_END
+  };
 
+  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
+  if (ret < 0) {
+    printf("Failed to set CS pin.\n");
+  }
+  return ret;
 }
 
 int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active) {
+  if (active) {
+    pindeio_d_state |= 1 << pin;
+  } else {
+    pindeio_d_state &= ~(1 << pin);
+  }
+    uint8_t buf[] = {
+          CH341_CMD_UIO_STREAM,
+          CH341_CMD_UIO_STM_OUT | pindeio_d_state,  // bitfield controlling value of d0-d7 where the rightmost bit is d0
+          CH341_CMD_UIO_STM_END
+  };
+
+  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
+  if (ret < 0) {
+    printf("Failed to set CS pin.\n");
+  }
+  return ret;
 
 }
 
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
   uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
-          CH341_CMD_UIO_STM_DIR | 0x3f,
-          CH341_CMD_UIO_STM_OUT | (active ? 0x36 : 0x37),
+          CH341_CMD_UIO_STM_DIR | 0x3f, // enable output on d0-d5
+          CH341_CMD_UIO_STM_OUT | (active ? 0x36 : 0x37),  // bitfield controlling value of d0-d7 where the rightmost bit is d0
           CH341_CMD_UIO_STM_END
   };
 
@@ -407,7 +438,18 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
 }
 
 int32_t pinedio_digital_read(struct pinedio_inst *inst, uint32_t pin) {
+  uint8_t buf[] = {
+    0xA0,
+  };
+  uint8_t output[6];
 
+  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), sizeof(output), buf, output, true);
+  if (ret < 0) {
+    fprintf(stderr, "Could not get input pins.\n");
+    return ret;
+  }
+  // *input = ((output[2] & 0x80) << 16) | ((output[1] & 0xef) << 8) | output[0];
+  return output[0] & 1 << pin; // maybe?
 }
 
 static int32_t pinedio_get_input(struct pinedio_inst *inst, uint32_t* input)
@@ -425,24 +467,21 @@ static int32_t pinedio_get_input(struct pinedio_inst *inst, uint32_t* input)
   return ret;
 }
 
-int32_t pinedio_get_irq_state(struct pinedio_inst *inst) {
+int32_t pinedio_get_irq_state(struct pinedio_inst *inst, uint32_t pin) {
   uint32_t input;
   int32_t ret = pinedio_get_input(inst, &input);
   if (ret != 0) {
     return ret;
   }
-  return (input & (1 << 10)) != 0 ? 1 : 0;
+  return (input & (1 << pin)) != 0 ? 1 : 0;
 }
 
 static void* pinedio_pin_poll_thread(void* arg) {
   struct pinedio_inst *inst = arg;
   int32_t ret = 0;
   bool should_exit = false;
-  uint32_t pin_masks[PINEDIO_INT_PIN_MAX];
-  pin_masks[PINEDIO_INT_PIN_IRQ] = 1 << 10;
 
   uint32_t input;
-//  pin_masks[PINEDIO_INT_PIN_BUSY] = 10 << 1;
   while (!should_exit) {
     ret = pinedio_get_input(inst, &input);
     pinedio_mutex_lock(&inst->usb_access_mutex);
@@ -450,7 +489,7 @@ static void* pinedio_pin_poll_thread(void* arg) {
     for (uint8_t int_pin = 0; int_pin < PINEDIO_INT_PIN_MAX; int_pin++) {
       struct pinedio_inst_int* inst_int = &inst->interrupts[int_pin];
       if (inst_int->callback == NULL) continue;
-      uint8_t state = (input & pin_masks[int_pin]) != 0;
+      uint8_t state = (input & ( 1 << int_pin)) != 0;
       if (inst_int->previous_state != 255 && inst_int->previous_state != state) {
         enum pinedio_int_mode mode =
                 inst_int->previous_state == false && state == true ? PINEDIO_INT_MODE_RISING : PINEDIO_INT_MODE_FALLING;
