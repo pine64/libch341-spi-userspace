@@ -232,26 +232,48 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
   libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
   uint16_t vid = 0x1A86;
   uint16_t pid = 0x5512;
-  inst->handle = libusb_open_device_with_vid_pid(NULL, vid, pid);
+
+  // discover devices
+  libusb_device **list;
+  libusb_device *found = NULL;
+  ssize_t cnt = libusb_get_device_list(NULL, &list);
+  ssize_t i = 0;
+
+  for (i = 0; i < cnt; i++) {
+    libusb_device *device = list[i];
+    struct libusb_device_descriptor desc;
+    ret = libusb_get_device_descriptor(device, &desc);
+
+    if (desc.idVendor == vid && desc.idProduct == pid ) {
+      found = device;
+      ret = libusb_open(found, &inst->handle);
+      if (inst->handle != NULL) {
+
+#ifdef __linux__
+        // On Windows, driver needs to be replaced manually by Zadig
+        ret = libusb_detach_kernel_driver(inst->handle, 0);
+        if (ret != 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
+          fprintf(stderr, "Cannot detach the existing USB driver. Claiming the interface may fail: %s\n",
+                libusb_error_name(ret));
+        }
+#endif
+        ret = libusb_claim_interface(inst->handle, 0);
+        if (ret != 0) {
+          fprintf(stderr, "Failed to claim interface 0: %s\n", libusb_error_name(ret));
+          libusb_close(inst->handle);
+        } else {
+          break;
+        }
+      }
+    }
+  }
+  libusb_free_device_list(list, 1);
+
+  //inst->handle = libusb_open_device_with_vid_pid(NULL, vid, pid);
   if (inst->handle == NULL) {
     // TODO: Rework this so we can receive error and print it.
     fprintf(stderr, "Couldn't open LoRa Adapator device.\n");
     return -2;
-  }
-
-#ifdef __linux__
-  // On Windows, driver needs to be replaced manually by Zadig
-  ret = libusb_detach_kernel_driver(inst->handle, 0);
-  if (ret != 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
-    fprintf(stderr, "Cannot detach the existing USB driver. Claiming the interface may fail: %s\n",
-            libusb_error_name(ret));
-  }
-#endif
-
-  ret = libusb_claim_interface(inst->handle, 0);
-  if (ret != 0) {
-    fprintf(stderr, "Failed to claim interface 0: %s\n", libusb_error_name(ret));
-    goto deinit_on_error;
   }
 
   // Allocate and pre-fill transfer structures.
