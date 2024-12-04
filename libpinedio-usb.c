@@ -523,6 +523,7 @@ pinedio_attach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin
       goto unlock;
     }
   }
+inst->int_running_cnt++;
 
 unlock:
   pinedio_mutex_unlock(&inst->usb_access_mutex);
