@@ -230,8 +230,12 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
   }
 
   libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
-  uint16_t vid = 0x1A86;
-  uint16_t pid = 0x5512;
+  if (inst->options[PINEDIO_OPTION_VID] == 0) {
+    inst->options[PINEDIO_OPTION_VID] = 0x1A86;
+  }
+  if (inst->options[PINEDIO_OPTION_PID] == 0) {
+    inst->options[PINEDIO_OPTION_PID] = 0x5512;
+  }
 
   // discover devices
   libusb_device **list;
@@ -244,7 +248,7 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
     struct libusb_device_descriptor desc;
     ret = libusb_get_device_descriptor(device, &desc);
 
-    if (desc.idVendor == vid && desc.idProduct == pid ) {
+    if (desc.idVendor == inst->options[PINEDIO_OPTION_VID] && desc.idProduct == inst->options[PINEDIO_OPTION_PID] ) {
       found = device;
       ret = libusb_open(found, &inst->handle);
       if (inst->handle != NULL) {
@@ -261,15 +265,23 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
         if (ret != 0) {
           fprintf(stderr, "Failed to claim interface 0: %s\n", libusb_error_name(ret));
           libusb_close(inst->handle);
+          inst->handle = NULL;
         } else {
-          break;
+          char _serial[9];
+          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial,9);
+          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL] && strncmp(_serial, inst->serial_number, 8) != 0) {
+            libusb_close(inst->handle);
+            inst->handle = NULL;
+          } else {
+            strncpy(inst->serial_number, _serial, 9);
+            break;
+          }
         }
       }
     }
   }
   libusb_free_device_list(list, 1);
 
-  //inst->handle = libusb_open_device_with_vid_pid(NULL, vid, pid);
   if (inst->handle == NULL) {
     // TODO: Rework this so we can receive error and print it.
     fprintf(stderr, "Couldn't open LoRa Adapator device.\n");
@@ -599,5 +611,6 @@ void pinedio_deinit(struct pinedio_inst *inst) {
     libusb_attach_kernel_driver(inst->handle, 0);
 #endif
     libusb_close(inst->handle);
+    inst->handle = NULL;
   }
 }
