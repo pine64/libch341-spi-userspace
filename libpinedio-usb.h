@@ -39,6 +39,9 @@ enum pinedio_int_mode {
 
 enum pinedio_option {
     PINEDIO_OPTION_AUTO_CS,
+    PINEDIO_OPTION_SEARCH_SERIAL,
+    PINEDIO_OPTION_VID,
+    PINEDIO_OPTION_PID,
     PINEDIO_OPTION_MAX
 };
 
@@ -65,6 +68,7 @@ struct pinedio_inst {
   bool pin_poll_thread_exit;
   struct pinedio_inst_int interrupts[PINEDIO_INT_PIN_MAX];
   uint32_t options[PINEDIO_OPTION_MAX];
+  char serial_number[9];
 };
 
 int32_t pinedio_init(struct pinedio_inst* inst, void* driver);
