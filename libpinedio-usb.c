@@ -268,7 +268,8 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
           inst->handle = NULL;
         } else {
           char _serial[9];
-          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial,9);
+          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial, 9);
+          libusb_get_string_descriptor(inst->handle, desc.iProduct, 0, inst->product_string, 96);
           if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL] && strncmp(_serial, inst->serial_number, 8) != 0) {
             libusb_close(inst->handle);
             inst->handle = NULL;
@@ -284,7 +285,7 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
 
   if (inst->handle == NULL) {
     // TODO: Rework this so we can receive error and print it.
-    fprintf(stderr, "Couldn't open LoRa Adapator device.\n");
+    fprintf(stderr, "Couldn't open LoRa USB device.\n");
     return -2;
   }
 
