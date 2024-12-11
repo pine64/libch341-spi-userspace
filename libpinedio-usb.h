@@ -69,6 +69,7 @@ struct pinedio_inst {
   struct pinedio_inst_int interrupts[PINEDIO_INT_PIN_MAX];
   uint32_t options[PINEDIO_OPTION_MAX];
   char serial_number[9];
+  char product_string[97];
 };
 
 int32_t pinedio_init(struct pinedio_inst* inst, void* driver);
