@@ -37,6 +37,10 @@
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+// store mode and state of d0-d7
+uint16_t pinedio_d_mode = 0;
+uint16_t pinedio_d_state = 0;
+
 enum trans_state {TRANS_ACTIVE = -2, TRANS_ERR = -1, TRANS_IDLE = 0};
 
 static void platform_sleep(uint32_t msecs) {
@@ -203,11 +207,155 @@ static uint8_t reverse_byte(uint8_t x) {
   return x;
 }
 
-int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
+int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
+  int32_t ret;
+  inst->int_running_cnt = 0;
+  inst->pin_poll_thread_exit = false;
+  for (int i = 0; i < PINEDIO_INT_PIN_MAX; i++) {
+    inst->interrupts[i].callback = NULL;
+  }
+
+  inst->options[PINEDIO_OPTION_AUTO_CS] = 1;
+
+  ret = pthread_mutex_init(&inst->usb_access_mutex, NULL);
+  if (ret != 0) {
+    fprintf(stderr, "Failed to initialize mutex, res: %d.\n", ret);
+    return -1;
+  }
+
+  ret = libusb_init(NULL);
+  if (ret < 0) {
+    fprintf(stderr, "Couldn't initialize libusb!\n");
+    return -1;
+  }
+
+  libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
+  if (inst->options[PINEDIO_OPTION_VID] == 0) {
+    inst->options[PINEDIO_OPTION_VID] = 0x1A86;
+  }
+  if (inst->options[PINEDIO_OPTION_PID] == 0) {
+    inst->options[PINEDIO_OPTION_PID] = 0x5512;
+  }
+
+  // discover devices
+  libusb_device **list;
+  libusb_device *found = NULL;
+  ssize_t cnt = libusb_get_device_list(NULL, &list);
+  ssize_t i = 0;
+
+  for (i = 0; i < cnt; i++) {
+    libusb_device *device = list[i];
+    struct libusb_device_descriptor desc;
+    ret = libusb_get_device_descriptor(device, &desc);
+
+    if (desc.idVendor == inst->options[PINEDIO_OPTION_VID] && desc.idProduct == inst->options[PINEDIO_OPTION_PID] ) {
+      found = device;
+      ret = libusb_open(found, &inst->handle);
+      if (inst->handle != NULL) {
+
+#ifdef __linux__
+        // On Windows, driver needs to be replaced manually by Zadig
+        ret = libusb_detach_kernel_driver(inst->handle, 0);
+        if (ret != 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
+          fprintf(stderr, "Cannot detach the existing USB driver. Claiming the interface may fail: %s\n",
+                libusb_error_name(ret));
+        }
+#endif
+        ret = libusb_claim_interface(inst->handle, 0);
+        if (ret != 0) {
+          fprintf(stderr, "Failed to claim interface 0: %s\n", libusb_error_name(ret));
+          libusb_close(inst->handle);
+          inst->handle = NULL;
+        } else {
+          char _serial[9];
+          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial, 9);
+          libusb_get_string_descriptor(inst->handle, desc.iProduct, 0, inst->product_string, 96);
+          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL] && strncmp(_serial, inst->serial_number, 8) != 0) {
+            libusb_close(inst->handle);
+            inst->handle = NULL;
+          } else {
+            strncpy(inst->serial_number, _serial, 9);
+            break;
+          }
+        }
+      }
+    }
+  }
+  libusb_free_device_list(list, 1);
+
+  if (inst->handle == NULL) {
+    // TODO: Rework this so we can receive error and print it.
+    fprintf(stderr, "Couldn't open LoRa USB device.\n");
+    return -2;
+  }
+
+  // Allocate and pre-fill transfer structures.
+  inst->transfer_out = libusb_alloc_transfer(0);
+  if (!inst->transfer_out) {
+    fprintf(stderr, "Failed to alloc libusb OUT transfer.\n");
+    goto deinit_on_error;
+  }
+  for (int i = 0; i < USB_IN_TRANSFERS; i++) {
+    inst->transfer_ins[i] = libusb_alloc_transfer(0);
+    if (inst->transfer_ins[i] == NULL) {
+      fprintf(stderr, "Failed to alloc libusb IN transfer %d.\n", i);
+      goto deinit_on_error;
+    }
+  }
+
+  // We use these helpers but don't fill the actual buffer yet.
+  libusb_fill_bulk_transfer(inst->transfer_out, inst->handle, CH341_WRITE_EP, NULL, 0, cb_out, NULL, CH341_USB_TIMEOUT);
+  for (int i = 0; i < USB_IN_TRANSFERS; i++)
+    libusb_fill_bulk_transfer(inst->transfer_ins[i], inst->handle, CH341_READ_EP, NULL, 0, cb_in, NULL,
+                              CH341_USB_TIMEOUT);
+
+  /**
+   * We don't need to initialize SPI at all, as by default it's configured properly.
+   * Only thing required is pinmux, what is anyway configured by CS change function.
+   */
+
+  pinedio_set_cs(inst, false);
+
+  return 0;
+
+deinit_on_error:
+  pinedio_deinit(inst);
+  return ret;
+}
+
+int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option, uint32_t value) {
+  inst->options[option] = value;
+}
+
+int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode) {
+    if (mode == 1) { // output
+    pinedio_d_mode |= (1 << pin);
+  } else {
+    pinedio_d_mode &= ~(1 << pin);
+  }
   uint8_t buf[] = {
           CH341_CMD_UIO_STREAM,
-          CH341_CMD_UIO_STM_DIR | 0x3f,
-          CH341_CMD_UIO_STM_OUT | (active ? 0x36 : 0x37),
+          CH341_CMD_UIO_STM_DIR | pinedio_d_mode, // enable output on d0-d5
+          CH341_CMD_UIO_STM_END
+  };
+
+  int32_t ret = 0; //usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
+  if (ret < 0) {
+    printf("Failed to set CS pin.\n");
+  }
+  return ret;
+}
+
+int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active) {
+  if (active) {
+    pinedio_d_state |= (1 << pin);
+  } else {
+    pinedio_d_state &= ~(1 << pin);
+  }
+    uint8_t buf[] = {
+          CH341_CMD_UIO_STREAM,
+          CH341_CMD_UIO_STM_OUT | pinedio_d_state,  // bitfield controlling value of d0-d7 where the rightmost bit is d0
+          CH341_CMD_UIO_STM_DIR | pinedio_d_mode,
           CH341_CMD_UIO_STM_END
   };
 
@@ -216,6 +364,12 @@ int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
     printf("Failed to set CS pin.\n");
   }
   return ret;
+
+}
+
+int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
+  return pinedio_digital_write(inst, 0, active);
+  
 }
 
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt) {
@@ -313,114 +467,19 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
   return 0;
 }
 
-int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
-  int32_t ret;
-  inst->int_running_cnt = 0;
-  inst->pin_poll_thread_exit = false;
-  for (int i = 0; i < PINEDIO_INT_PIN_MAX; i++) {
-    inst->interrupts[i].callback = NULL;
-  }
+int32_t pinedio_digital_read(struct pinedio_inst *inst, uint32_t pin) {
+  uint8_t buf[] = {
+    0xA0,
+  };
+  uint8_t output[6];
 
-  inst->options[PINEDIO_OPTION_AUTO_CS] = 1;
-
-  ret = pthread_mutex_init(&inst->usb_access_mutex, NULL);
-  if (ret != 0) {
-    fprintf(stderr, "Failed to initialize mutex, res: %d.\n", ret);
-    return -1;
-  }
-
-  ret = libusb_init(NULL);
+  int32_t ret = usb_transfer(inst, __func__, sizeof(buf), sizeof(output), buf, output, true);
   if (ret < 0) {
-    fprintf(stderr, "Couldn't initialize libusb!\n");
-    return -1;
+    fprintf(stderr, "Could not get input pins.\n");
+    return ret;
   }
-
-  libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
-  uint16_t vid = 0x1A86;
-  uint16_t pid = 0x5512;
-  inst->handle = libusb_open_device_with_vid_pid(NULL, vid, pid);
-  if (inst->handle == NULL) {
-    // TODO: Rework this so we can receive error and print it.
-    fprintf(stderr, "Couldn't open LoRa Adapator device.\n");
-    return -2;
-  }
-
-#ifdef __linux__
-  // On Windows, driver needs to be replaced manually by Zadig
-  ret = libusb_detach_kernel_driver(inst->handle, 0);
-  if (ret != 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
-    fprintf(stderr, "Cannot detach the existing USB driver. Claiming the interface may fail: %s\n",
-            libusb_error_name(ret));
-  }
-#endif
-
-  ret = libusb_claim_interface(inst->handle, 0);
-  if (ret != 0) {
-    fprintf(stderr, "Failed to claim interface 0: %s\n", libusb_error_name(ret));
-    goto deinit_on_error;
-  }
-
-  // Allocate and pre-fill transfer structures.
-  inst->transfer_out = libusb_alloc_transfer(0);
-  if (!inst->transfer_out) {
-    fprintf(stderr, "Failed to alloc libusb OUT transfer.\n");
-    goto deinit_on_error;
-  }
-  for (int i = 0; i < USB_IN_TRANSFERS; i++) {
-    inst->transfer_ins[i] = libusb_alloc_transfer(0);
-    if (inst->transfer_ins[i] == NULL) {
-      fprintf(stderr, "Failed to alloc libusb IN transfer %d.\n", i);
-      goto deinit_on_error;
-    }
-  }
-
-  // We use these helpers but don't fill the actual buffer yet.
-  libusb_fill_bulk_transfer(inst->transfer_out, inst->handle, CH341_WRITE_EP, NULL, 0, cb_out, NULL, CH341_USB_TIMEOUT);
-  for (int i = 0; i < USB_IN_TRANSFERS; i++)
-    libusb_fill_bulk_transfer(inst->transfer_ins[i], inst->handle, CH341_READ_EP, NULL, 0, cb_in, NULL,
-                              CH341_USB_TIMEOUT);
-
-  /**
-   * We don't need to initialize SPI at all, as by default it's configured properly.
-   * Only thing required is pinmux, what is anyway configured by CS change function.
-   */
-
-  pinedio_set_cs(inst, false);
-
-  return 0;
-
-deinit_on_error:
-  pinedio_deinit(inst);
-  return ret;
-}
-
-void pinedio_deinit(struct pinedio_inst *inst) {
-  pinedio_mutex_lock(&inst->usb_access_mutex);
-  if (inst->int_running_cnt != 0) {
-    inst->pin_poll_thread_exit = true;
-    pinedio_mutex_unlock(&inst->usb_access_mutex);
-    pthread_join(inst->pin_poll_thread, NULL);
-  } else {
-    pinedio_mutex_unlock(&inst->usb_access_mutex);
-  }
-
-  for (int i = 0; i < USB_IN_TRANSFERS; i++) {
-    if (inst->transfer_ins[i] != NULL) {
-      libusb_free_transfer(inst->transfer_ins[i]);
-    }
-  }
-  if (inst->transfer_out != NULL) {
-    libusb_free_transfer(inst->transfer_out);
-  }
-  
-  if (inst->handle != NULL) {
-    // We don't know if claim of interface was successful, but libusb handles this.
-    libusb_release_interface(inst->handle, 0);
-#ifdef __linux__
-    libusb_attach_kernel_driver(inst->handle, 0);
-#endif
-    libusb_close(inst->handle);
-  }
+  // *input = ((output[2] & 0x80) << 16) | ((output[1] & 0xef) << 8) | output[0];
+  return output[0] & 1 << pin; // maybe?
 }
 
 static int32_t pinedio_get_input(struct pinedio_inst *inst, uint32_t* input)
@@ -438,24 +497,21 @@ static int32_t pinedio_get_input(struct pinedio_inst *inst, uint32_t* input)
   return ret;
 }
 
-int32_t pinedio_get_irq_state(struct pinedio_inst *inst) {
+int32_t pinedio_get_irq_state(struct pinedio_inst *inst, uint32_t pin) {
   uint32_t input;
   int32_t ret = pinedio_get_input(inst, &input);
   if (ret != 0) {
     return ret;
   }
-  return (input & (1 << 10)) != 0 ? 1 : 0;
+  return (input & (1 << pin)) != 0 ? 1 : 0;
 }
 
 static void* pinedio_pin_poll_thread(void* arg) {
   struct pinedio_inst *inst = arg;
   int32_t ret = 0;
   bool should_exit = false;
-  uint32_t pin_masks[PINEDIO_INT_PIN_MAX];
-  pin_masks[PINEDIO_INT_PIN_IRQ] = 1 << 10;
 
   uint32_t input;
-//  pin_masks[PINEDIO_INT_PIN_BUSY] = 10 << 1;
   while (!should_exit) {
     ret = pinedio_get_input(inst, &input);
     pinedio_mutex_lock(&inst->usb_access_mutex);
@@ -463,7 +519,7 @@ static void* pinedio_pin_poll_thread(void* arg) {
     for (uint8_t int_pin = 0; int_pin < PINEDIO_INT_PIN_MAX; int_pin++) {
       struct pinedio_inst_int* inst_int = &inst->interrupts[int_pin];
       if (inst_int->callback == NULL) continue;
-      uint8_t state = (input & pin_masks[int_pin]) != 0;
+      uint8_t state = (input & ( 1 << int_pin)) != 0;
       if (inst_int->previous_state != 255 && inst_int->previous_state != state) {
         enum pinedio_int_mode mode =
                 inst_int->previous_state == false && state == true ? PINEDIO_INT_MODE_RISING : PINEDIO_INT_MODE_FALLING;
@@ -502,6 +558,7 @@ pinedio_attach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin
       goto unlock;
     }
   }
+inst->int_running_cnt++;
 
 unlock:
   pinedio_mutex_unlock(&inst->usb_access_mutex);
@@ -529,6 +586,32 @@ unlock:
   return res;
 }
 
-int32_t pinedio_set_option(struct pinedio_inst *inst, enum pinedio_option option, uint32_t value) {
-  inst->options[option] = value;
+void pinedio_deinit(struct pinedio_inst *inst) {
+  pinedio_mutex_lock(&inst->usb_access_mutex);
+  if (inst->int_running_cnt != 0) {
+    inst->pin_poll_thread_exit = true;
+    pinedio_mutex_unlock(&inst->usb_access_mutex);
+    pthread_join(inst->pin_poll_thread, NULL);
+  } else {
+    pinedio_mutex_unlock(&inst->usb_access_mutex);
+  }
+
+  for (int i = 0; i < USB_IN_TRANSFERS; i++) {
+    if (inst->transfer_ins[i] != NULL) {
+      libusb_free_transfer(inst->transfer_ins[i]);
+    }
+  }
+  if (inst->transfer_out != NULL) {
+    libusb_free_transfer(inst->transfer_out);
+  }
+  
+  if (inst->handle != NULL) {
+    // We don't know if claim of interface was successful, but libusb handles this.
+    libusb_release_interface(inst->handle, 0);
+#ifdef __linux__
+    libusb_attach_kernel_driver(inst->handle, 0);
+#endif
+    libusb_close(inst->handle);
+    inst->handle = NULL;
+  }
 }
