@@ -578,7 +578,8 @@ int32_t pinedio_deattach_interrupt(struct pinedio_inst *inst, enum pinedio_int_p
   if (inst->int_running_cnt == 0) {
     inst->pin_poll_thread_exit = true;
     pinedio_mutex_unlock(&inst->usb_access_mutex);
-    pthread_join(inst->pin_poll_thread, NULL);
+    if (inst->pin_poll_thread != pthread_self())
+      pthread_join(inst->pin_poll_thread, NULL);
     return 0;
   }
 unlock:
