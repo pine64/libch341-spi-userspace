@@ -82,13 +82,14 @@ static int32_t usb_transfer(struct pinedio_inst *inst, const char *func, unsigne
                             const uint8_t *writearr, uint8_t *readarr, bool lock)
 {
   int state_out = TRANS_IDLE;
-  inst->transfer_out->buffer = (uint8_t*)writearr;
-  inst->transfer_out->length = writecnt;
-  inst->transfer_out->user_data = &state_out;
 
   if (lock) {
     pinedio_mutex_lock(&inst->usb_access_mutex);
   }
+
+  inst->transfer_out->buffer = (uint8_t*)writearr;
+  inst->transfer_out->length = writecnt;
+  inst->transfer_out->user_data = &state_out;
 
   /* Schedule write first */
   if (writecnt > 0) {
