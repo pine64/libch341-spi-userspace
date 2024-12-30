@@ -7,8 +7,11 @@ void callback_test() {
 }
 
 int main(int argc, char** argv) {
-  struct pinedio_inst inst;
-  pinedio_init(&inst, NULL);
+  struct pinedio_inst inst = pinedio_struct_default();
+  int ret;
+  if ((ret = pinedio_init(&inst, NULL)) < 0) {
+    return ret;
+  }
 #if 1
   for (int i = 0; i < 10; i++) {
 #if 1

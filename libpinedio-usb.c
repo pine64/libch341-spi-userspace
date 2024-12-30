@@ -208,15 +208,22 @@ static uint8_t reverse_byte(uint8_t x) {
   return x;
 }
 
+/**
+ * This will initialize the struct and set the default options.
+ */
+struct pinedio_inst pinedio_struct_default() {
+  struct pinedio_inst inst = {0};
+  inst.options[PINEDIO_OPTION_AUTO_CS] = 1;
+  inst.options[PINEDIO_OPTION_VID] = 0x1A86;
+  inst.options[PINEDIO_OPTION_PID] = 0x5512;
+  return inst;
+}
+
+/**
+ * Use pinedio_struct_default() to initialize inst
+ */
 int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
   int32_t ret;
-  inst->int_running_cnt = 0;
-  inst->pin_poll_thread_exit = false;
-  for (int i = 0; i < PINEDIO_INT_PIN_MAX; i++) {
-    inst->interrupts[i].callback = NULL;
-  }
-
-  inst->options[PINEDIO_OPTION_AUTO_CS] = 1;
 
   ret = pthread_mutex_init(&inst->usb_access_mutex, NULL);
   if (ret != 0) {
@@ -231,12 +238,6 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
   }
 
   libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
-  if (inst->options[PINEDIO_OPTION_VID] == 0) {
-    inst->options[PINEDIO_OPTION_VID] = 0x1A86;
-  }
-  if (inst->options[PINEDIO_OPTION_PID] == 0) {
-    inst->options[PINEDIO_OPTION_PID] = 0x5512;
-  }
 
   // discover devices
   libusb_device **list;
@@ -361,16 +362,16 @@ int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool acti
   };
 
   int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
-  if (ret < 0) {
-    printf("Failed to set CS pin.\n");
-  }
   return ret;
 
 }
 
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
-  return pinedio_digital_write(inst, 0, active);
-  
+  int32_t ret = pinedio_digital_write(inst, 0, active);
+  if (ret < 0) {
+    printf("Failed to set CS pin.\n");
+  }
+  return ret;
 }
 
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt) {
@@ -460,9 +461,8 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
   if (ret < 0)
     return -1;
 
-  unsigned int i;
-  for (i = 0; i < count; i++) {
-    *read_buf++ = reverse_byte(*read_buf);
+  for (; read_buf < read_buf + count; read_buf++) {
+    *read_buf = reverse_byte(*read_buf);
   }
 
   return 0;
