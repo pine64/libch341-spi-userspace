@@ -10,7 +10,11 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <libusb-1.0/libusb.h>
+#ifdef __APPLE__
+  #include <libusb/libusb.h>
+#else
+  #include <libusb-1.0/libusb.h>
+#endif
 #include <pthread.h>
 
 #define USB_IN_TRANSFERS 32
