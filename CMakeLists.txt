@@ -3,6 +3,8 @@ project(pinedio-usb C)
 
 set(CMAKE_C_STANDARD 11)
 
+add_compile_options(-g -Wall)
+
 add_library(pinedio-usb STATIC libpinedio-usb.c)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
