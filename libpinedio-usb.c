@@ -362,16 +362,16 @@ int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool acti
   };
 
   int32_t ret = usb_transfer(inst, __func__, sizeof(buf), 0, buf, NULL, true);
-  if (ret < 0) {
-    printf("Failed to set CS pin.\n");
-  }
   return ret;
 
 }
 
 int32_t pinedio_set_cs(struct pinedio_inst *inst, bool active) {
-  return pinedio_digital_write(inst, 0, active);
-  
+  int32_t ret = pinedio_digital_write(inst, 0, active);
+  if (ret < 0) {
+    printf("Failed to set CS pin.\n");
+  }
+  return ret;
 }
 
 int32_t pinedio_write_read(struct pinedio_inst* inst, uint8_t *writearr, uint32_t writecnt, uint8_t* readarr, uint32_t readcnt) {
