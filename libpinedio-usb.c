@@ -461,9 +461,8 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
   if (ret < 0)
     return -1;
 
-  unsigned int i;
-  for (i = 0; i < count; i++) {
-    *read_buf++ = reverse_byte(*read_buf);
+  for (; read_buf < read_buf + count; read_buf++) {
+    *read_buf = reverse_byte(*read_buf);
   }
 
   return 0;
