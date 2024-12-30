@@ -7,7 +7,7 @@ void callback_test() {
 }
 
 int main(int argc, char** argv) {
-  struct pinedio_inst inst;
+  struct pinedio_inst inst = pinedio_struct_default();
   pinedio_init(&inst, NULL);
 #if 1
   for (int i = 0; i < 10; i++) {

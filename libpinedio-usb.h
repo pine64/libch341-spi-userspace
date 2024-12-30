@@ -72,6 +72,7 @@ struct pinedio_inst {
   char product_string[97];
 };
 
+struct pinedio_inst pinedio_struct_default();
 int32_t pinedio_init(struct pinedio_inst* inst, void* driver);
 int32_t pinedio_set_option(struct pinedio_inst* inst, enum pinedio_option option, uint32_t value);
 int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode);
