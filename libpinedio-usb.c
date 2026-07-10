@@ -588,6 +588,18 @@ int32_t pinedio_deattach_interrupt(struct pinedio_inst *inst, enum pinedio_int_p
     pinedio_mutex_unlock(&inst->usb_access_mutex);
     if (inst->pin_poll_thread != pthread_self())
       pthread_join(inst->pin_poll_thread, NULL);
+    else
+      /* Called from within the poll thread itself (e.g. an interrupt
+       * callback detaching its own interrupt). We cannot join ourselves,
+       * but skipping reclamation entirely strands this thread's stack:
+       * nothing ever joins it, and the pthread_create() in the next
+       * pinedio_attach_interrupt() overwrites the only handle. Each
+       * strand permanently leaks the thread's ~8 MB stack mapping;
+       * callers that detach from the callback on every radio interrupt
+       * leak at interrupt rate (meshtastic/firmware#10468 — hundreds of
+       * GB of VSZ within days). Detaching ourselves instead lets glibc
+       * reclaim the stack when the thread exits. */
+      pthread_detach(pthread_self());
     return 0;
   }
 unlock:
