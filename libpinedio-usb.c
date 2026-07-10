@@ -212,6 +212,10 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
   int32_t ret;
   inst->int_running_cnt = 0;
   inst->pin_poll_thread_exit = false;
+  inst->pin_poll_thread_started = false;
+  inst->pin_poll_active = false;
+  pthread_mutex_init(&inst->poll_park_mutex, NULL);
+  pthread_cond_init(&inst->poll_park_cond, NULL);
   for (int i = 0; i < PINEDIO_INT_PIN_MAX; i++) {
     inst->interrupts[i].callback = NULL;
   }
@@ -510,15 +514,32 @@ int32_t pinedio_get_irq_state(struct pinedio_inst *inst, uint32_t pin) {
 static void* pinedio_pin_poll_thread(void* arg) {
   struct pinedio_inst *inst = arg;
   int32_t ret = 0;
-  bool should_exit = false;
 
   uint32_t input;
-  while (!should_exit) {
+  for (;;) {
+    /* Park while no interrupts are attached; terminate only on deinit.
+     * Parking (rather than exiting) means attach/detach cycles all reuse
+     * this one thread: there is never a thread to join, so detaching from
+     * within the interrupt callback is inherently safe, and no stack can
+     * ever be stranded (the leak class fixed minimally in PR #10). */
+    pthread_mutex_lock(&inst->poll_park_mutex);
+    while (!inst->pin_poll_thread_exit && !inst->pin_poll_active)
+      pthread_cond_wait(&inst->poll_park_cond, &inst->poll_park_mutex);
+    bool exiting = inst->pin_poll_thread_exit;
+    pthread_mutex_unlock(&inst->poll_park_mutex);
+    if (exiting)
+      break;
+
     ret = pinedio_get_input(inst, &input);
     if (ret < 0) {
-      should_exit = true;
+      /* Surface the error but keep polling at the normal cadence: a later
+       * successful read clears in_error, so a transient USB fault
+       * self-heals instead of silently killing interrupt delivery until
+       * the next full deinit/init cycle (previous behavior: the thread
+       * died and interrupts stopped without recovery). */
       inst->in_error = true;
       fprintf(stderr, "Failed to get input, res: %d\n", ret);
+      platform_sleep(1000 / 30);
       continue;
     }
     if (ret != 0) continue;
@@ -540,10 +561,10 @@ static void* pinedio_pin_poll_thread(void* arg) {
       inst_int->previous_state = state;
     }
 
-    should_exit = inst->pin_poll_thread_exit;
     pinedio_mutex_unlock(&inst->usb_access_mutex);
     platform_sleep(1000 / 30);
   }
+  return NULL;
 }
 
 int32_t
@@ -559,12 +580,22 @@ pinedio_attach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin
   inst->interrupts[int_pin].mode = int_mode;
   inst->interrupts[int_pin].callback = callback;
   if (inst->int_running_cnt == 0) {
-    inst->pin_poll_thread_exit = false;
-    res = pthread_create(&inst->pin_poll_thread, NULL, pinedio_pin_poll_thread, inst);
-    if (res != 0) {
-      fprintf(stderr, "Failed to create thread, res: %d\n", res);
-      goto unlock;
+    /* First interrupt: create the persistent poll thread exactly once,
+     * then (re)activate polling. Subsequent attach/detach cycles only
+     * toggle pin_poll_active — zero thread churn at interrupt rate. */
+    pthread_mutex_lock(&inst->poll_park_mutex);
+    if (!inst->pin_poll_thread_started) {
+      res = pthread_create(&inst->pin_poll_thread, NULL, pinedio_pin_poll_thread, inst);
+      if (res != 0) {
+        pthread_mutex_unlock(&inst->poll_park_mutex);
+        fprintf(stderr, "Failed to create thread, res: %d\n", res);
+        goto unlock;
+      }
+      inst->pin_poll_thread_started = true;
     }
+    inst->pin_poll_active = true;
+    pthread_cond_signal(&inst->poll_park_cond);
+    pthread_mutex_unlock(&inst->poll_park_mutex);
   }
 inst->int_running_cnt++;
 
@@ -584,10 +615,15 @@ int32_t pinedio_deattach_interrupt(struct pinedio_inst *inst, enum pinedio_int_p
   inst->interrupts[int_pin].callback = NULL;
   inst->int_running_cnt--;
   if (inst->int_running_cnt == 0) {
-    inst->pin_poll_thread_exit = true;
+    /* Last interrupt detached: PARK the poll thread instead of
+     * terminating it. No join is needed — so detaching from within the
+     * interrupt callback (which runs on this very thread) is safe — and
+     * no stack is ever stranded. The thread is reaped exactly once, in
+     * pinedio_deinit(). */
+    pthread_mutex_lock(&inst->poll_park_mutex);
+    inst->pin_poll_active = false;
+    pthread_mutex_unlock(&inst->poll_park_mutex);
     pinedio_mutex_unlock(&inst->usb_access_mutex);
-    if (inst->pin_poll_thread != pthread_self())
-      pthread_join(inst->pin_poll_thread, NULL);
     return 0;
   }
 unlock:
@@ -597,12 +633,20 @@ unlock:
 
 void pinedio_deinit(struct pinedio_inst *inst) {
   pinedio_mutex_lock(&inst->usb_access_mutex);
-  if (inst->int_running_cnt != 0) {
-    inst->pin_poll_thread_exit = true;
-    pinedio_mutex_unlock(&inst->usb_access_mutex);
-    pthread_join(inst->pin_poll_thread, NULL);
-  } else {
-    pinedio_mutex_unlock(&inst->usb_access_mutex);
+  pinedio_mutex_unlock(&inst->usb_access_mutex);
+  /* Reap the persistent poll thread — the ONE place it terminates. */
+  pthread_mutex_lock(&inst->poll_park_mutex);
+  bool reap = inst->pin_poll_thread_started;
+  inst->pin_poll_thread_exit = true;
+  inst->pin_poll_thread_started = false;
+  pthread_cond_signal(&inst->poll_park_cond);
+  pthread_mutex_unlock(&inst->poll_park_mutex);
+  if (reap) {
+    if (inst->pin_poll_thread != pthread_self())
+      pthread_join(inst->pin_poll_thread, NULL);
+    else
+      /* deinit from within the interrupt callback: cannot join self. */
+      pthread_detach(pthread_self());
   }
 
   for (int i = 0; i < USB_IN_TRANSFERS; i++) {
