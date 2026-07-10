@@ -65,7 +65,11 @@ struct pinedio_inst {
   uint8_t int_running_cnt;
   pthread_mutex_t usb_access_mutex;
   pthread_t pin_poll_thread;
-  bool pin_poll_thread_exit;
+  bool pin_poll_thread_exit;       /* deinit requested: poll thread terminates */
+  bool pin_poll_thread_started;    /* poll thread exists (created once per init) */
+  bool pin_poll_active;            /* >=1 interrupt attached: poll vs park */
+  pthread_mutex_t poll_park_mutex; /* protects the three flags above */
+  pthread_cond_t poll_park_cond;   /* signaled on attach / deinit */
   bool in_error;
   struct pinedio_inst_int interrupts[PINEDIO_INT_PIN_MAX];
   uint32_t options[PINEDIO_OPTION_MAX];
