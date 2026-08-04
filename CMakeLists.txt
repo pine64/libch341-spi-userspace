@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.29)
+
+if (WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+endif()
+
 project(pinedio-usb C)
 
 set(CMAKE_C_STANDARD 11)
