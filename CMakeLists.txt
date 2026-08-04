@@ -4,6 +4,7 @@ project(pinedio-usb C)
 set(CMAKE_C_STANDARD 11)
 
 add_library(pinedio-usb STATIC libpinedio-usb.c)
+set_target_properties(pinedio-usb PROPERTIES PUBLIC_HEADER libpinedio-usb.h)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 target_link_libraries(pinedio-usb ${LIBUSB_LIBRARIES})
@@ -12,3 +13,5 @@ target_include_directories(pinedio-usb PRIVATE ${LIBUSB_INCLUDE_DIRS})
 
 add_executable(pinedio-test test.c)
 target_link_libraries(pinedio-test PRIVATE pinedio-usb)
+
+install(TARGETS pinedio-usb)
