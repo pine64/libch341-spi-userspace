@@ -553,7 +553,9 @@ int32_t
 pinedio_attach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin, enum pinedio_int_mode int_mode,
                          void (*callback)(void)) {
   int32_t res = 0;
-  // TODO: Add check if int_pin is correct
+  if ((unsigned) int_pin >= PINEDIO_INT_PIN_MAX) {
+    return -1;
+  }
   pinedio_mutex_lock(&inst->usb_access_mutex);
   if (inst->interrupts[int_pin].callback != NULL) {
     inst->int_running_cnt--;
@@ -577,7 +579,9 @@ unlock:
 }
 
 int32_t pinedio_deattach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin) {
-  // TODO: Add check if int_pin is correct
+  if ((unsigned) int_pin >= PINEDIO_INT_PIN_MAX) {
+    return -1;
+  }
   pinedio_mutex_lock(&inst->usb_access_mutex);
   int32_t res;
   if (inst->int_running_cnt == 0 || inst->interrupts[int_pin].callback == NULL) {
