@@ -253,6 +253,18 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
       found = device;
       ret = libusb_open(found, &inst->handle);
       if (inst->handle != NULL) {
+        // Compare the serial before detaching the driver or claiming the interface:
+        // a device that is not the one searched for is left as it was
+        char _serial[9];
+        if (libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, (unsigned char *) _serial, 9) < 0) {
+          _serial[0] = '\0'; // no serial (iSerialNumber 0), or the read failed
+        }
+        if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL]
+            && (_serial[0] == '\0' || strncmp(_serial, inst->serial_number, 8) != 0)) {
+          libusb_close(inst->handle);
+          inst->handle = NULL;
+          continue;
+        }
 
 #ifdef __linux__
         // On Windows, driver needs to be replaced manually by Zadig
@@ -268,19 +280,9 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
           libusb_close(inst->handle);
           inst->handle = NULL;
         } else {
-          char _serial[9];
-          if (libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, (unsigned char *) _serial, 9) < 0) {
-            _serial[0] = '\0'; // no serial (iSerialNumber 0), or the read failed
-          }
           libusb_get_string_descriptor(inst->handle, desc.iProduct, 0, inst->product_string, 96);
-          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL]
-              && (_serial[0] == '\0' || strncmp(_serial, inst->serial_number, 8) != 0)) {
-            libusb_close(inst->handle);
-            inst->handle = NULL;
-          } else {
-            strncpy(inst->serial_number, _serial, 9);
-            break;
-          }
+          strncpy(inst->serial_number, _serial, 9);
+          break;
         }
       }
     }
