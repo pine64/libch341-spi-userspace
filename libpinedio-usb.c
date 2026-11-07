@@ -208,7 +208,28 @@ static uint8_t reverse_byte(uint8_t x) {
   return x;
 }
 
+// The USB port path of a device as Linux names it in sysfs: "<bus>-<port>[.<port>...]" ("" when unknown)
+static void pinedio_port_path(libusb_device *device, char *out, size_t n) {
+  uint8_t ports[8];
+  int cnt = libusb_get_port_numbers(device, ports, (int) sizeof(ports));
+  out[0] = '\0';
+  if (cnt <= 0) {
+    return;
+  }
+  size_t len = (size_t) snprintf(out, n, "%u-%u", (unsigned) libusb_get_bus_number(device), (unsigned) ports[0]);
+  for (int i = 1; i < cnt && len < n; i++) {
+    len += (size_t) snprintf(out + len, n - len, ".%u", (unsigned) ports[i]);
+  }
+  if (len >= n) {
+    out[0] = '\0';
+  }
+}
+
 int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
+  return pinedio_init_at_port(inst, driver, NULL);
+}
+
+int32_t pinedio_init_at_port(struct pinedio_inst *inst, void *driver, const char *port_path) {
   int32_t ret;
   inst->int_running_cnt = 0;
   inst->pin_poll_thread_exit = false;
@@ -250,6 +271,13 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
     ret = libusb_get_device_descriptor(device, &desc);
 
     if (desc.idVendor == inst->options[PINEDIO_OPTION_VID] && desc.idProduct == inst->options[PINEDIO_OPTION_PID] ) {
+      if (port_path != NULL) {
+        char port[32];
+        pinedio_port_path(device, port, sizeof(port));
+        if (strcmp(port, port_path) != 0) {
+          continue;
+        }
+      }
       found = device;
       ret = libusb_open(found, &inst->handle);
       if (inst->handle != NULL) {
