@@ -269,9 +269,12 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
           inst->handle = NULL;
         } else {
           char _serial[9];
-          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial, 9);
+          if (libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, (unsigned char *) _serial, 9) < 0) {
+            _serial[0] = '\0'; // no serial (iSerialNumber 0), or the read failed
+          }
           libusb_get_string_descriptor(inst->handle, desc.iProduct, 0, inst->product_string, 96);
-          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL] && strncmp(_serial, inst->serial_number, 8) != 0) {
+          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL]
+              && (_serial[0] == '\0' || strncmp(_serial, inst->serial_number, 8) != 0)) {
             libusb_close(inst->handle);
             inst->handle = NULL;
           } else {
