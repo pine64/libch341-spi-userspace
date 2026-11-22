@@ -74,6 +74,10 @@ struct pinedio_inst {
 };
 
 int32_t pinedio_init(struct pinedio_inst* inst, void* driver);
+// As pinedio_init, but only the device on USB port port_path ("<bus>-<port>[.<port>...]", as in sysfs);
+// NULL = any port. PINEDIO_HAS_INIT_AT_PORT tells a caller that this function exists.
+#define PINEDIO_HAS_INIT_AT_PORT 1
+int32_t pinedio_init_at_port(struct pinedio_inst* inst, void* driver, const char *port_path);
 int32_t pinedio_set_option(struct pinedio_inst* inst, enum pinedio_option option, uint32_t value);
 int32_t pinedio_set_pin_mode(struct pinedio_inst *inst, uint32_t pin, uint32_t mode);
 int32_t pinedio_digital_write(struct pinedio_inst *inst, uint32_t pin, bool active);
