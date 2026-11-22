@@ -269,9 +269,12 @@ int32_t pinedio_init(struct pinedio_inst *inst, void *driver) {
           inst->handle = NULL;
         } else {
           char _serial[9];
-          libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, _serial, 9);
+          if (libusb_get_string_descriptor_ascii(inst->handle, desc.iSerialNumber, (unsigned char *) _serial, 9) < 0) {
+            _serial[0] = '\0'; // no serial (iSerialNumber 0), or the read failed
+          }
           libusb_get_string_descriptor(inst->handle, desc.iProduct, 0, inst->product_string, 96);
-          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL] && strncmp(_serial, inst->serial_number, 8) != 0) {
+          if (inst->options[PINEDIO_OPTION_SEARCH_SERIAL]
+              && (_serial[0] == '\0' || strncmp(_serial, inst->serial_number, 8) != 0)) {
             libusb_close(inst->handle);
             inst->handle = NULL;
           } else {
@@ -462,7 +465,7 @@ int32_t pinedio_transceive(struct pinedio_inst* inst, uint8_t *write_buf, uint8_
 
   unsigned int i;
   for (i = 0; i < count; i++) {
-    *read_buf++ = reverse_byte(*read_buf);
+    read_buf[i] = reverse_byte(read_buf[i]);
   }
 
   return 0;
@@ -550,7 +553,9 @@ int32_t
 pinedio_attach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin, enum pinedio_int_mode int_mode,
                          void (*callback)(void)) {
   int32_t res = 0;
-  // TODO: Add check if int_pin is correct
+  if ((unsigned) int_pin >= PINEDIO_INT_PIN_MAX) {
+    return -1;
+  }
   pinedio_mutex_lock(&inst->usb_access_mutex);
   if (inst->interrupts[int_pin].callback != NULL) {
     inst->int_running_cnt--;
@@ -574,7 +579,9 @@ unlock:
 }
 
 int32_t pinedio_deattach_interrupt(struct pinedio_inst *inst, enum pinedio_int_pin int_pin) {
-  // TODO: Add check if int_pin is correct
+  if ((unsigned) int_pin >= PINEDIO_INT_PIN_MAX) {
+    return -1;
+  }
   pinedio_mutex_lock(&inst->usb_access_mutex);
   int32_t res;
   if (inst->int_running_cnt == 0 || inst->interrupts[int_pin].callback == NULL) {
